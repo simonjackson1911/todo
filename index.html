@@ -1,0 +1,1169 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>To Do</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="To Do">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#ffffff">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<!--
+  Simon's to-do app. A view of to-do.md in the private vault repo: it reads the
+  file through the GitHub API and writes ticks, stars, dates, moves and new tasks
+  back to it. to-do.md stays the one list (AGENTS.md: the vault is the system of
+  record). The GitHub token lives only in this phone's app storage, never in the
+  vault (hard stop 2). Source: system/todo-app/ in the vault.
+-->
+<style>
+:root{
+  --bg:#ffffff; --fg:#1b1b1f; --muted:#6b6b73; --line:#e6e6ea; --card:#ffffff;
+  --cardfg:#1b1b1f; --accent:#4f6bd8; --sheet:#ffffff; --chip:rgba(255,255,255,.18);
+  --input:#f2f2f5; --danger:#c0392b;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#111114; --fg:#f1f1f4; --muted:#9a9aa3; --line:#26262c; --card:#1e1e23;
+    --cardfg:#f1f1f4; --accent:#8ea2ff; --sheet:#1a1a1f; --input:#26262c; --danger:#ff7b6b; }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;overflow-x:hidden;background:var(--bg);color:var(--fg);
+  font:17px/1.35 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+input,textarea,select{font:inherit;color:var(--fg)}
+.view{display:none;min-height:100vh;min-height:100dvh}
+.view.on{display:block}
+
+/* Home */
+#home{padding:calc(env(safe-area-inset-top) + 14px) 16px calc(env(safe-area-inset-bottom) + 40px)}
+.hdr{display:flex;align-items:center;gap:14px;margin:6px 0 14px}
+.avatar{width:44px;height:44px;border-radius:50%;background:var(--accent);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:600;font-size:16px;flex:none}
+.hdr h1{font-size:22px;margin:0;flex:1;font-weight:650}
+.iconbtn{width:40px;height:40px;display:flex;align-items:center;justify-content:center;color:var(--accent)}
+.iconbtn svg{width:24px;height:24px}
+.row{display:flex;align-items:center;gap:16px;padding:13px 4px;width:100%;text-align:left}
+.row .ico{width:28px;height:28px;flex:none;display:flex;align-items:center;justify-content:center}
+.row .ico svg{width:26px;height:26px}
+.row .name{flex:1;font-size:19px}
+.row .count{color:var(--muted);font-size:16px}
+.sep{height:1px;background:var(--line);margin:10px 0}
+.group .ghead{display:flex;align-items:center;gap:16px;padding:14px 4px;width:100%}
+.group .ghead .ico{width:28px;height:28px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.group .ghead .ico svg{width:24px;height:24px}
+.group .ghead .name{flex:1;font-weight:650;font-size:19px;text-align:left}
+.group .ghead .chev{transition:transform .2s;color:var(--muted)}
+.group.closed .ghead .chev{transform:rotate(-90deg)}
+.group .glists{margin-left:14px;padding-left:14px;border-left:2px solid var(--line)}
+.group.closed .glists{display:none}
+.foot{color:var(--muted);font-size:13px;text-align:center;margin-top:24px}
+.foot button{color:var(--accent);font-size:13px;margin-left:8px}
+
+/* List */
+#list{background:var(--lbg,#5b6fc7);color:#fff;padding:calc(env(safe-area-inset-top) + 8px) 12px calc(env(safe-area-inset-bottom) + 40px)}
+.ltop{display:flex;align-items:center;justify-content:space-between;height:44px}
+.back{display:flex;align-items:center;gap:2px;font-size:18px;color:#fff}
+.back svg{width:26px;height:26px}
+#list h2{font-size:38px;font-weight:750;margin:6px 6px 14px;letter-spacing:-.5px}
+.chips{display:flex;gap:8px;margin:0 4px 12px}
+.chip{background:var(--chip);color:#fff;border-radius:10px;padding:7px 12px;font-size:14px;font-weight:600}
+.card{display:flex;align-items:flex-start;gap:14px;background:var(--card);color:var(--cardfg);
+  border-radius:10px;padding:15px 14px;margin-bottom:5px;box-shadow:0 1px 1px rgba(0,0,0,.06)}
+.sw{position:relative;margin-bottom:5px;border-radius:10px;overflow:hidden;background:var(--card)}
+.sw .card{margin-bottom:0;position:relative;z-index:1;touch-action:pan-y;transition:transform .2s ease}
+.sw.dragging .card{transition:none}
+.sw-l,.sw-r{position:absolute;top:0;bottom:0;display:flex;align-items:center;gap:10px;padding:0 10px}
+.sw-l{left:0}.sw-r{right:0}
+.sw-btn{width:64px;height:46px;border-radius:23px;display:flex;align-items:center;justify-content:center;color:#fff}
+.sw-btn svg{width:24px;height:24px}
+.sw-btn.sun{background:#3b6cf0}.sw-btn.mv{background:#f0a223}.sw-btn.del{background:#e5484d}
+.tick{width:28px;height:28px;border-radius:50%;border:2px solid #8a8a92;flex:none;margin-top:1px;
+  display:flex;align-items:center;justify-content:center;color:#fff}
+.tick svg{width:16px;height:16px;opacity:0}
+.card.done .tick{background:var(--lbg,#5b6fc7);border-color:var(--lbg,#5b6fc7)}
+.card.done .tick svg{opacity:1}
+.card.done .ttl{text-decoration:line-through;color:var(--muted)}
+.cbody{flex:1;min-width:0}
+.ttl{font-size:17px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.sub{font-size:13px;color:var(--muted);margin-top:3px}
+.sub .wt{display:inline-flex;align-items:center;gap:4px;background:#fdf0dc;color:#9a5a12;font-weight:600;font-size:12px;border-radius:10px;padding:2px 8px 2px 6px;vertical-align:1px}
+.sub .wt svg{width:13px;height:13px}
+@media (prefers-color-scheme: dark){.sub .wt{background:#3a2a14;color:#f0b366}}
+.sub .od{color:var(--danger)}
+.handle{display:flex;align-items:center;justify-content:center;width:48px;align-self:stretch;margin:-15px -14px -15px 0;font-size:26px;color:#8a8a92;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;cursor:grab}
+.reorder .rcol{align-self:stretch}
+.sw.lift{box-shadow:0 12px 28px rgba(0,0,0,.28);z-index:6;transition:box-shadow .15s;will-change:transform}
+.sw.shift{transition:transform .18s ease;will-change:transform}
+.donebtn{color:#fff;font-weight:650;font-size:17px;padding:0 8px}
+button.chip{border:0}
+.rvrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}
+.rvrow button{background:var(--input);border-radius:14px;padding:5px 11px;font-size:13px;font-weight:600}
+.rvrow .rvdrop{color:var(--danger)}
+.rcol{display:flex;flex-direction:column;align-items:center;gap:10px;flex:none}
+.wbadge{display:flex;flex-direction:column;align-items:center;gap:1px;color:#b0681a;padding:2px 4px;border-radius:8px;background:#fdf0dc;min-width:34px}
+.sbadge{display:flex;flex-direction:column;align-items:center;gap:2px;color:#2f5ea8;padding:3px 5px;border-radius:8px;background:#e3ecfb;min-width:34px;font-size:10px;font-weight:700;line-height:1}
+@media (prefers-color-scheme: dark){.sbadge{background:#1c2c48;color:#8fb4f0}}
+.wbadge svg{width:16px;height:16px}.wbadge span{font-size:11px;font-weight:700;line-height:1}
+@media (prefers-color-scheme: dark){.wbadge{background:#3a2a14;color:#f0b366}}
+.star{width:28px;height:28px;flex:none;color:var(--lbg,#5b6fc7);display:flex;align-items:center;justify-content:center}
+.star svg{width:24px;height:24px}
+.star.off{color:#9a9aa3}
+.section{color:#fff;font-weight:650;font-size:15px;margin:16px 6px 8px;display:flex;align-items:center;gap:6px}
+.empty{color:rgba(255,255,255,.85);text-align:center;margin:40px 20px;font-size:16px}
+.addbar{position:fixed;z-index:15;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom) + 12px);
+  background:rgba(0,0,0,.22);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border-radius:12px;display:flex;align-items:center;gap:12px;padding:0 16px;height:58px;color:#fff}
+.addbar svg{width:26px;height:26px;flex:none}
+.addbar input{flex:1;background:transparent;border:0;outline:0;color:#fff;font-size:17px}
+.addprev{display:none;position:fixed;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom) + 78px);z-index:16;background:rgba(0,0,0,.72);color:#fff;border-radius:10px;padding:8px 12px;font-size:14px}
+.addprev.on{display:block}
+.qa-prev{font-size:14px;color:var(--accent);margin:-8px 0 8px;min-height:18px}
+.addgo{display:none;background:#fff;color:#2b3a8a;border-radius:9px;padding:7px 12px;font-weight:650;font-size:15px;flex:none}
+.addgo.on{display:block}
+.addbar input::placeholder{color:rgba(255,255,255,.9)}
+
+/* Sheets */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;z-index:20}
+.scrim.on{display:block}
+.sheet{position:fixed;left:0;right:0;bottom:0;max-height:88vh;overflow:auto;background:var(--sheet);
+  color:var(--fg);border-radius:16px 16px 0 0;padding:18px 18px calc(env(safe-area-inset-bottom) + 22px);
+  transform:translateY(105%);transition:transform .22s ease;z-index:21}
+.sheet.on{transform:none}
+.grab{width:40px;height:5px;border-radius:3px;background:var(--line);margin:-6px auto 14px}
+.wsum{display:flex;align-items:center;gap:10px;background:#fdf0dc;color:#7a4510;border-radius:10px;padding:10px 12px;margin:8px 0 6px;font-size:15px}
+.wsum svg{width:20px;height:20px;flex:none}
+@media (prefers-color-scheme: dark){.wsum{background:#3a2a14;color:#f0c890}}
+.closex{display:block;margin-left:auto;color:var(--accent);font-size:16px;padding:2px 0 8px 12px}
+.sheet h3{margin:0 0 6px;font-size:21px;line-height:1.3}
+.d-title{display:block;width:100%;min-height:0;border:0;background:transparent;resize:none;font-size:21px;font-weight:650;line-height:1.3;padding:0;margin:0 0 6px;outline:0;overflow:hidden;color:var(--fg)}
+.d-notes{display:block;width:100%;border:0;background:var(--input);border-radius:10px;resize:none;font-size:15px;line-height:1.4;padding:10px;margin:6px 0 14px;outline:0;overflow:hidden;min-height:44px;color:var(--fg)}
+.notes{color:var(--muted);font-size:15px;white-space:pre-wrap;margin:6px 0 12px}
+.meta{font-size:13px;color:var(--muted);margin-bottom:14px}
+.act{display:flex;align-items:center;gap:14px;width:100%;padding:13px 2px;border-top:1px solid var(--line);text-align:left;font-size:17px}
+.act svg{width:22px;height:22px;color:var(--accent);flex:none}
+.act input[type=date]{margin-left:auto;background:var(--input);border:0;border-radius:8px;padding:6px 8px}
+.seg{display:flex;background:var(--input);border-radius:9px;padding:3px;margin-left:auto}
+.seg button{padding:6px 8px;border-radius:7px;font-size:14px}
+.seg button.on{background:var(--sheet);box-shadow:0 1px 2px rgba(0,0,0,.15);font-weight:600}
+.links a{display:block;color:var(--accent);text-decoration:none;padding:6px 0;font-size:15px}
+.danger{color:var(--danger)}
+textarea{width:100%;min-height:150px;background:var(--input);border:0;border-radius:10px;padding:10px;font-size:15px}
+.field{display:block;margin:12px 0}
+.field span{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+.field input,.field select{width:100%;background:var(--input);border:0;border-radius:10px;padding:11px}
+.btn{display:block;width:100%;background:var(--accent);color:#fff;border-radius:12px;padding:13px;font-weight:600;margin-top:14px;text-align:center}
+.btn.ghost{background:var(--input);color:var(--fg)}
+.help{font-size:13px;color:var(--muted)}
+.cscrim{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;z-index:30}
+.cscrim.on{display:block}
+.compose{position:fixed;left:0;right:0;bottom:0;z-index:31;background:var(--sheet);color:var(--fg);border-radius:14px 14px 0 0;
+  padding:10px 12px 10px;box-shadow:0 -6px 24px rgba(0,0,0,.18);display:none}
+.compose.on{display:block}
+.cp-top{display:flex;align-items:flex-end;gap:8px}
+.cp-top textarea{flex:1;min-height:0;border:0;background:var(--input);border-radius:12px;padding:12px 14px;font-size:18px;line-height:1.35;resize:none;outline:0;height:96px;color:var(--fg)}
+.cp-add{flex:none;background:var(--accent);color:#fff;border-radius:12px;padding:0 18px;height:48px;font-size:17px;font-weight:700}
+.cp-note{font-size:13px;color:var(--muted);margin:8px 2px 2px}
+.cp-send{width:38px;height:38px;border-radius:50%;background:var(--line);color:#fff;display:flex;align-items:center;justify-content:center;flex:none;margin-bottom:2px}
+.cp-send.on{background:var(--accent)}
+.cp-send svg{width:20px;height:20px}
+.cp-prev{font-size:13px;color:var(--muted);margin:7px 2px 8px;min-height:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cp-prev.live{color:var(--accent);font-weight:600}
+.cp-row{display:flex;gap:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:2px}
+.cp-row::-webkit-scrollbar{display:none}
+.cp-chip{flex:none;display:flex;align-items:center;gap:5px;background:var(--input);border-radius:16px;padding:7px 12px;font-size:14px;font-weight:600;white-space:nowrap;color:var(--fg)}
+.cp-chip svg{width:16px;height:16px}
+.cp-chip.on{background:var(--accent);color:#fff}
+.toast{position:fixed;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom) + 84px);background:#222;color:#fff;
+  border-radius:12px;padding:12px 14px;font-size:15px;z-index:40;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.on{opacity:1}
+.toast{display:flex;align-items:center;gap:12px}.toast span{flex:1}
+.toast.act{pointer-events:auto}
+#undo{color:#8ea2ff;font-weight:650;font-size:16px;padding:4px 2px}
+.searchbox{display:flex;align-items:center;gap:10px;margin:4px 0 12px}
+.searchbox input{flex:1;background:var(--input);border:0;border-radius:10px;padding:11px 12px;outline:0}
+#cc{padding:calc(env(safe-area-inset-top) + 6px) 0 0;background:var(--bg)}
+.cctop{display:flex;align-items:center;gap:8px;padding:0 8px 6px}
+.cctop .back{flex:none}.ccstamp{flex:1;text-align:center;font-size:13px;color:var(--muted)}
+.ccframe{display:block;width:100%;border:0;height:calc(100dvh - env(safe-area-inset-top) - 56px);background:#fff}
+.plusbtn{background:var(--accent);color:#fff;border-radius:50%;width:36px;height:36px;margin-left:4px}
+.plusbtn svg{width:20px;height:20px}
+.qa-text{min-height:64px;font-size:17px}
+.qa-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.qa-lab{font-size:15px;color:var(--muted);width:44px;flex:none}
+.qa-row .seg{margin-left:0}
+.qa-chips{display:flex;flex-wrap:wrap;gap:6px}
+.qa-chip{background:var(--input);border-radius:16px;padding:6px 11px;font-size:14px}
+.qa-chip.on{background:var(--accent);color:#fff}
+.qa-tog{display:flex;align-items:center;gap:6px;font-size:15px;margin-right:16px}
+#search{padding:calc(env(safe-area-inset-top) + 14px) 12px 40px}
+#search .card{border:1px solid var(--line)}
+</style>
+</head>
+<body>
+
+<section id="home" class="view on"></section>
+<section id="list" class="view"></section>
+<section id="search" class="view"></section>
+<section id="cc" class="view"></section>
+
+<div class="scrim" id="scrim"></div>
+<div class="sheet" id="sheet"></div>
+<div class="toast" id="toast"></div>
+<div class="cscrim" id="cscrim"></div>
+<div class="compose" id="compose"></div>
+
+<script>
+"use strict";
+/* ---------- Config ---------- */
+const TAGS = {inbox:"Inbox", search:"Job search", MOHARA:"MOHARA", OMMANI:"OMMANI", home:"Home",
+  personal:"Personal", files:"Mac and files", system:"Vault", none:"Tasks"};
+const TAG_ORDER = ["inbox","search","MOHARA","OMMANI","home","personal","files","system","none"];
+const GROUPS = ["Now","Next","Later","Someday"];
+const ACTIVE = ["Now","Next","Later"];
+const COLOURS = {Now:"#5b6fc7", Next:"#3a8a80", Later:"#7d62b3", Someday:"#8a6d4e",
+  myday:"#4778a8", important:"#b2476b", planned:"#2f7d6a", waiting:"#a0611c", review:"#55606e", all:"#5b6fc7"};
+const APP_VERSION = "2026-10-07n";
+const SKEY = "dom-todo-settings", CKEY = "dom-todo-cache", OKEY = "dom-todo-open";
+
+function store(k, v){ try{ if(v===undefined) return JSON.parse(localStorage.getItem(k)||"null"); localStorage.setItem(k, JSON.stringify(v)); }catch(e){ return null; } }
+let settings = Object.assign({repo:"", branch:"main", path:"to-do.md", vault:"Work", token:""}, store(SKEY)||{});
+let state = {base:"", text:"", sha:"", items:[], fetched:0};
+let route = {view:"home"};
+const SORTKEY="dom-todo-sort";
+let sortModes = store(SORTKEY) || {};
+let reorderMode = false;
+const listKeyOf = ctx => ctx.group+"|"+ctx.tag;
+let openGroups = store(OKEY) || {Now:true, Next:true, Later:false, Someday:false};
+
+/* ---------- Dates (phone's local time) ---------- */
+function iso(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function today(){ return iso(new Date()); }
+function nice(s){ const d=new Date(s+"T12:00:00"); return d.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"}); }
+
+/* ---------- Parse to-do.md ---------- */
+const ITEM_RE = /^- \[( |x|X)\] (.*)$/;
+function tagOf(body){
+  const all=[...body.matchAll(/`([A-Za-z]+)`/g)].filter(m=>TAGS[m[1]] && m[1]!=="none");
+  return all.length ? all[all.length-1] : null;
+}
+function plain(s){
+  return s.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g,"$2").replace(/\[\[([^\]]+)\]\]/g,(m,p)=>p.split("/").pop())
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g,"$1").replace(/\*\*/g,"").replace(/`/g,"").replace(/\s+/g," ").trim();
+}
+function parse(text){
+  const lines=text.split("\n"), items=[]; let group=null, sub=null;
+  lines.forEach((ln,i)=>{
+    let m;
+    if((m=ln.match(/^## (.+)$/))){ group=m[1].trim(); sub=null; return; }
+    if((m=ln.match(/^#{3,4} (.+)$/))){ sub=m[1].trim(); return; }
+    if(!GROUPS.includes(group)) return;
+    if(!(m=ln.match(ITEM_RE))) return;
+    const body=m[2];
+    const tm=tagOf(body);
+    const tag=tm?tm[1]:"none";
+    const content=tm?body.slice(0,tm.index):body;
+    const after=tm?body.slice(tm.index+tm[0].length):"";
+    const links=[];
+    for(const lm of body.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)) links.push({label:lm[1], path:lm[2]});
+    for(const lm of body.matchAll(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g)) links.push({label:lm[2]||lm[1].split("/").pop(), path:lm[1]});
+    let c=content.replace(/\[(id|due|today|added|waiting|reviewed|started): [^\]]+\]/g,"").replace(/⭐/g,"").trim();
+    let title, notes="";
+    const bm=c.match(/^\*\*(.+?)\*\*\s*(.*)$/s);
+    if(bm){ title=plain(bm[1]).replace(/[:.]$/,""); notes=plain(bm[2]); }
+    else{
+      const p=plain(c);
+      if(p.length>110){ const cut=p.slice(20,110).search(/[:;.] /); if(cut>=0){ title=p.slice(0,cut+20); notes=p.slice(cut+22); } else title=p; }
+      else title=p;
+    }
+    const id=(body.match(/\[id: ([^\]]+)\]/)||[])[1]||null;
+    const due=(body.match(/\[due: (\d{4}-\d{2}-\d{2})\]/)||[])[1]||null;
+    const myday=(body.match(/\[today: (\d{4}-\d{2}-\d{2})\]/)||[])[1]||null;
+    const added=(body.match(/\[added: (\d{4}-\d{2}-\d{2})\]/)||[])[1]||"";
+    const waiting=(body.match(/\[waiting: (\d{4}-\d{2}-\d{2})\]/)||[])[1]||null;
+    const reviewed=(body.match(/\[reviewed: (\d{4}-\d{2}-\d{2})\]/)||[])[1]||null;
+    const started=(body.match(/\[started: (\d{4}-\d{2}-\d{2})\]/)||[])[1]||null;
+    const list = group==="Someday" ? (sub||"Other") : tag;
+    items.push({line:i, raw:ln, done:m[1]!==" ", group, sub, tag, list, title:title||"(untitled)", notes,
+      links, id, due, myday, added, waiting, reviewed, started, star:/⭐/.test(body), after, contentRaw:content, restRaw:tm?body.slice(tm.index):"", bold:!!bm});
+  });
+  return items;
+}
+
+/* ---------- GitHub ---------- */
+function api(path){ return "https://api.github.com/repos/"+settings.repo+"/contents/"+encodeURIComponent(settings.path).replace(/%2F/g,"/")+path; }
+function hdrs(){ return {"Authorization":"Bearer "+settings.token, "Accept":"application/vnd.github+json", "X-GitHub-Api-Version":"2022-11-28"}; }
+function b64decode(b){ const bin=atob(b.replace(/\n/g,"")); const u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return new TextDecoder("utf-8").decode(u); }
+function b64encode(s){ const u=new TextEncoder().encode(s); let bin=""; for(let i=0;i<u.length;i+=8192) bin+=String.fromCharCode.apply(null,u.subarray(i,i+8192)); return btoa(bin); }
+/* GitHub I/O. A network failure is marked so the change waits on the phone. */
+function apiFor(path, q){ return "https://api.github.com/repos/"+settings.repo+"/contents/"+path.split("/").map(encodeURIComponent).join("/")+q; }
+function netErr(){ const x=new Error("No connection: saved on the phone; it will sync"); x.network=true; return x; }
+async function gh(url, opts){
+  let r; try{ r=await fetch(url, opts); }catch(e){ throw netErr(); }
+  if(r.status>=500) throw netErr();
+  return r;
+}
+async function fetchPath(path){
+  const r=await gh(apiFor(path,"?ref="+encodeURIComponent(settings.branch)),{headers:hdrs(),cache:"no-store"});
+  if(!r.ok){ const e=new Error(r.status===401?"The GitHub token isn't working. Check Settings.":r.status===404?"Can't find "+path+" in the repo. Check Settings.":"GitHub said "+r.status); e.status=r.status; throw e; }
+  const j=await r.json();
+  return {text:b64decode(j.content), sha:j.sha};
+}
+async function fetchFile(){ return fetchPath(settings.path); }
+async function putFile(text, sha, message){
+  const who={name:"Simon Jackson", email:"simonjackson1911@users.noreply.github.com"};
+  const r=await gh(apiFor(settings.path,""),{method:"PUT",headers:Object.assign({"Content-Type":"application/json"},hdrs()),
+    body:JSON.stringify({message, content:b64encode(text), sha, branch:settings.branch, committer:who, author:who})});
+  if(!r.ok){ const e=new Error("Couldn't save ("+r.status+")"); e.status=r.status; throw e; }
+  const j=await r.json();
+  return j.content.sha;
+}
+
+/* Local state = the last copy from GitHub (base) with any changes still
+   waiting to sync (pending) applied on top. Changes are saved on the phone
+   first, then sent one at a time, in order, and retried when the signal
+   comes back. */
+const PKEY="dom-todo-pending";
+let pending = store(PKEY) || [];
+function savePending(){ store(PKEY, pending); }
+function recompute(){
+  const L=(state.base||"").split("\n");
+  for(const p of pending) applyOp(L, p.op);
+  state.text=L.join("\n"); state.items=parse(state.text);
+}
+function setText(text, sha){
+  state.base=text; state.sha=sha; state.fetched=Date.now();
+  store(CKEY,{text, sha, fetched:state.fetched});
+  recompute();
+}
+let loading=false;
+async function refresh(quiet){
+  if(!settings.token||!settings.repo){ if(!quiet) openSettings(); return; }
+  if(loading) return; loading=true;
+  try{ const f=await fetchFile(); setText(f.text,f.sha); render(); }
+  catch(e){ if(!quiet || !e.network) toast(e.network?"No connection: showing the last copy":e.message); }
+  finally{ loading=false; }
+  pump();
+}
+function locate(lines, m){
+  if(!m) return -1;
+  let i=lines.indexOf(m.raw);
+  if(i>=0) return i;
+  if(m.id){ i=lines.findIndex(l=>ITEM_RE.test(l) && l.includes("[id: "+m.id+"]")); if(i>=0) return i; }
+  return -1;
+}
+function applyOp(L, op){
+  if(op.k==="set"){ const i=locate(L,op.m); if(i<0) return false; L[i]=op.line; return true; }
+  if(op.k==="del"){ const i=locate(L,op.m); if(i<0) return false; L.splice(i,1); return true; }
+  if(op.k==="move"){ const i=locate(L,op.m); if(i<0) return false; let ln=L.splice(i,1)[0];
+    if(op.tag && op.group!=="Someday"){ ln=retag(ln, op.tag); insertInto(L, op.group, op.tag, ln); }
+    else placeLine(L, op.group, op.from, ln);
+    return true; }
+  if(op.k==="add"){ if(op.heading) insertUnder(L, op.group, op.heading, op.line); else if(op.top) insertTop(L, op.group, op.tag, op.line); else insertInto(L, op.group, op.tag, op.line); return true; }
+  if(op.k==="reorder"){
+    const idx=op.order.map(r=>L.indexOf(r)); if(idx.some(i=>i<0)) return false;
+    const slots=idx.slice().sort((a,b)=>a-b); op.order.forEach((r,k)=>{ L[slots[k]]=r; }); return true;
+  }
+  if(op.k==="restore"){
+    if(op.m){ const i=locate(L,op.m); if(i>=0) L.splice(i,1); }
+    const a = op.anchor!=null ? L.indexOf(op.anchor) : -1;
+    if(a>=0) L.splice(a+1,0,op.line);
+    else if(op.group==="Someday") insertUnder(L,"Someday",op.list||"Other",op.line);
+    else insertInto(L, op.group||"Now", op.tag||"none", op.line);
+    return true;
+  }
+  return false;
+}
+function commit(op, msg, undo, label){
+  const test=state.text.split("\n");
+  if(!applyOp(test, op)){ toast("That task changed on the Mac; refreshing"); refresh(); return false; }
+  pending.push({op, msg:"To-do app: "+msg}); savePending();
+  recompute(); render(); pump();
+  if(undo) toast(label||"Done", ()=>commit(undo, "undo: "+msg));
+  return true;
+}
+let pumping=false, retryTimer=null;
+async function pump(){
+  if(pumping || !pending.length || !settings.token || !settings.repo) return;
+  pumping=true;
+  try{
+    while(pending.length){
+      const p=pending[0];
+      try{ await pushOne(p); pending.shift(); savePending(); recompute(); render(); }
+      catch(e){
+        if(e.network){ clearTimeout(retryTimer); retryTimer=setTimeout(pump, 20000); break; }
+        pending.shift(); savePending(); recompute(); render();
+        toast(e.message||"Couldn't save that change");
+      }
+    }
+  } finally { pumping=false; }
+}
+async function pushOne(p){
+  for(let attempt=0; attempt<3; attempt++){
+    const f=await fetchFile();
+    const L=f.text.split("\n");
+    if(!applyOp(L, p.op)){ state.base=f.text; state.sha=f.sha; throw new Error("A task changed on the Mac before a change could save, so that change was skipped. Check the list."); }
+    const text=L.join("\n");
+    try{ const sha=await putFile(text, f.sha, p.msg); state.base=text; state.sha=sha; state.fetched=Date.now(); store(CKEY,{text, sha, fetched:state.fetched}); return; }
+    catch(e){ if(e.status===409||e.status===422) continue; throw e; }
+  }
+  throw new Error("Couldn't save after three tries; skipped. Check the list.");
+}
+window.addEventListener("online", ()=>pump());
+
+/* ---------- Line edits ---------- */
+function groupRange(lines, group){
+  const s=lines.findIndex(l=>l.trim()==="## "+group);
+  if(s<0) return null;
+  let e=lines.findIndex((l,i)=>i>s && /^## /.test(l)); if(e<0) e=lines.length;
+  return [s,e];
+}
+function insertInto(lines, group, tag, newLine){
+  const r=groupRange(lines, group); if(!r) throw new Error("No "+group+" section in to-do.md");
+  let lastSame=-1, lastAny=-1;
+  for(let i=r[0]+1;i<r[1];i++){ if(ITEM_RE.test(lines[i])){ lastAny=i; const t=tagOf(lines[i]); if((t?t[1]:"none")===tag) lastSame=i; } }
+  const at = lastSame>=0 ? lastSame+1 : (lastAny>=0 ? lastAny+1 : r[0]+1);
+  lines.splice(at,0,newLine);
+}
+function insertTop(lines, group, tag, newLine){
+  const r=groupRange(lines, group); if(!r) throw new Error("No "+group+" section in to-do.md");
+  for(let i=r[0]+1;i<r[1];i++){ if(ITEM_RE.test(lines[i])){ const t=tagOf(lines[i]); if((t?t[1]:"none")===tag){ lines.splice(i,0,newLine); return; } } }
+  insertInto(lines, group, tag, newLine);
+}
+function insertUnder(lines, group, heading, newLine){
+  const r=groupRange(lines, group); if(!r) throw new Error("No "+group+" section in to-do.md");
+  let h=-1; for(let i=r[0]+1;i<r[1];i++) if(/^#{3,4} /.test(lines[i]) && lines[i].replace(/^#{3,4} /,"").trim()===heading){ h=i; break; }
+  if(h<0){ let at=r[1]; while(at>r[0]+1 && lines[at-1].trim()==="") at--; lines.splice(at,0,"","### "+heading,newLine); return; }
+  let end=r[1]; for(let i=h+1;i<r[1];i++) if(/^#/.test(lines[i])){ end=i; break; }
+  let last=h; for(let i=h+1;i<end;i++) if(ITEM_RE.test(lines[i])) last=i;
+  lines.splice(last+1,0,newLine);
+}
+function placeLine(lines, group, item, ln){
+  if(group==="Someday") insertUnder(lines, "Someday", item.group==="Someday"?item.list:"Other", ln);
+  else insertInto(lines, group, item.tag, ln);
+}
+function retag(line, tag){
+  const all=[...line.matchAll(/`([A-Za-z]+)`/g)].filter(m=>TAGS[m[1]] && m[1]!=="none");
+  if(all.length){ const m=all[all.length-1]; return tag==="none" ? (line.slice(0,m.index).replace(/\s+$/,"")+line.slice(m.index+m[0].length)) : line.slice(0,m.index)+"`"+tag+"`"+line.slice(m.index+m[0].length); }
+  if(tag==="none") return line;
+  const cut=line.search(/\s(→|\[(?:id|due|today|added|waiting|reviewed|started): |⭐)/);
+  return cut<0 ? line+" `"+tag+"`" : line.slice(0,cut)+" `"+tag+"`"+line.slice(cut);
+}
+function setMarker(line, key, value){
+  const re=new RegExp("\\s*\\["+key+": [^\\]]+\\]","g");
+  line=line.replace(re,"");
+  return value ? line+" ["+key+": "+value+"]" : line;
+}
+const short = t => t.length>60 ? t.slice(0,57)+"..." : t;
+const M = it => ({raw:it.raw, id:it.id});
+function refreshItem(it, raw){ const n=state.items.find(x=>x.raw===raw); if(n) Object.assign(it, n); }
+function setLine(it, line, msg, undoable, label){
+  const ok=commit({k:"set", m:M(it), line}, msg, undoable?{k:"set", m:{raw:line, id:it.id}, line:it.raw}:null, label);
+  if(ok) refreshItem(it, line);
+}
+function anchorOf(it){ const L=state.text.split("\n"); const i=locate(L, M(it)); return i>0 ? L[i-1] : null; }
+function toggleDone(it){
+  const done=!it.done;
+  setLine(it, it.raw.replace(/^- \[[ xX]\]/, done?"- [x]":"- [ ]"), (done?"done: ":"reopened: ")+short(it.title), true, done?"Completed":"Reopened");
+}
+function toggleStar(it){ setLine(it, it.star ? it.raw.replace(/\s*⭐/g,"") : it.raw+" ⭐", (it.star?"unstarred: ":"starred: ")+short(it.title)); }
+function setDue(it, d){ setLine(it, setMarker(it.raw,"due",d), (d?"due "+d+": ":"no date: ")+short(it.title)); }
+/* Started (Simon, 8 Oct): [started: date] marks a task as under way; the date is the last movement.
+   A started task with no movement for 7 days shows in Review, so started can't hide a stall. */
+function setStarted(it, on){ setLine(it, setMarker(it.raw,"started",on?today():null), (on?(it.started?"still on it: ":"started: "):"not started: ")+short(it.title)); }
+function toggleWaiting(it){ const on=!it.waiting; setLine(it, setMarker(it.raw,"waiting",on?today():null), (on?"waiting: ":"no longer waiting: ")+short(it.title)); }
+function daysSince(d){ return Math.max(0, Math.round((new Date(today()+"T12:00:00")-new Date(d+"T12:00:00"))/86400000)); }
+// Review: open 14+ days with no date and not waiting (clock restarts on Keep), or waiting 7+ days.
+const STALE_DAYS=14, CHASE_DAYS=7, STALL_DAYS=7;
+function isStale(it){ const base=it.reviewed||it.added; return ACTIVE.includes(it.group) && !it.due && !it.waiting && !it.started && !!base && daysSince(base)>=STALE_DAYS; }
+function isStalled(it){ return ACTIVE.includes(it.group) && !!it.started && !it.waiting && daysSince(it.started)>=STALL_DAYS; }
+function isChase(it){ return ACTIVE.includes(it.group) && !!it.waiting && daysSince(it.waiting)>=CHASE_DAYS; }
+function reviewAge(it){ return isChase(it) ? daysSince(it.waiting)+1000 : isStalled(it) ? daysSince(it.started)+500 : daysSince(it.reviewed||it.added); }
+function toggleMyDay(it){ const on=it.myday!==today(); setLine(it, setMarker(it.raw,"today",on?today():null), (on?"added to My Day: ":"off My Day: ")+short(it.title)); }
+function moveTo(it, group, tag){
+  tag = tag || it.tag;
+  if(it.group===group && it.tag===tag) return;
+  const from={group:it.group, tag:it.tag, list:it.list};
+  const newLine = (group!=="Someday" && tag!==it.tag) ? retag(it.raw, tag) : it.raw;
+  const where = group+(group!=="Someday"?", "+TAGS[tag]:"");
+  commit({k:"move", m:M(it), group, tag, from}, "moved to "+where+": "+short(it.title),
+    {k:"restore", m:{raw:newLine, id:it.id}, anchor:anchorOf(it), line:it.raw, group:it.group, tag:it.tag, list:it.list}, "Moved to "+where);
+}
+function removeItem(it){
+  commit({k:"del", m:M(it)}, "deleted: "+short(it.title),
+    {k:"restore", m:null, anchor:anchorOf(it), line:it.raw, group:it.group, tag:it.tag, list:it.list}, "Deleted");
+}
+function rebuild(item, newTitle, newNotes){
+  const MK=/\s*(\[(?:id|due|today|added|waiting|reviewed|started): [^\]]+\]|⭐)/g;
+  const markers=(item.contentRaw.match(MK)||[]).map(x=>x.trim());
+  let c=item.contentRaw.replace(MK,"").trim();
+  const t=newTitle.replace(/\s+/g," ").trim(), nn=newNotes.replace(/\s+/g," ").trim();
+  if(!t) throw new Error("A task needs a title");
+  const oldNotesRaw = item.bold ? c.replace(/^\*\*.+?\*\*\s*/s,"") : "";
+  const keepLinks = l => (l.match(/\[\[[^\]]+\]\]|\[[^\]]+\]\([^)]+\)/g)||[]).filter(k=>!nn.includes(k));
+  let notesPart;
+  if(nn===item.notes) notesPart = item.bold ? oldNotesRaw : (item.notes ? item.notes : "");
+  else notesPart = [nn, ...keepLinks(oldNotesRaw)].filter(Boolean).join(" ");
+  if(!item.bold && !item.notes && nn===""){ c = (t===item.title) ? c : t; }
+  else c = "**"+t+(notesPart?":":"")+"**"+(notesPart?" "+notesPart:"");
+  return "- ["+(item.done?"x":" ")+"] "+c+(markers.length?" "+markers.join(" "):"")+(item.restRaw?" "+item.restRaw.trim():"");
+}
+function editText(it, title, notes){
+  if(title.trim()===it.title && notes.trim()===it.notes) return;
+  if(!it.bold && /\]\(|\[\[/.test(it.contentRaw) && title.trim()!==it.title) throw new Error("This one has links in its title: use Edit the markdown");
+  setLine(it, rebuild(it, title, notes), "edited: "+short(title));
+}
+function editRaw(it, raw){
+  if(!ITEM_RE.test(raw)) throw new Error("A task line has to start with \"- [ ] \"");
+  setLine(it, raw, "edited: "+short(it.title));
+}
+/* ---------- Smart quick-add ----------
+   Reads the sentence from the end backwards, peeling off words it knows
+   (dates, "important", an area, now/next/later/someday, "waiting", "my day"),
+   and stops at the first word it doesn't know. Everything before that is the
+   title. So: say the task first, then the details. */
+const WD=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+const WDS={sun:0,mon:1,tue:2,tues:2,wed:3,thu:4,thur:4,thurs:4,fri:5,sat:6};
+const MON={jan:0,january:0,feb:1,february:1,mar:2,march:2,apr:3,april:3,may:4,jun:5,june:5,jul:6,july:6,aug:7,august:7,sep:8,sept:8,september:8,oct:9,october:9,nov:10,november:10,dec:11,december:11};
+const NUMW={one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,a:1};
+const AREAW={"job search":"search","jobsearch":"search","search":"search","mohara":"MOHARA","ommani":"OMMANI","home":"home","personal":"personal","vault":"system","mac":"files","files":"files"};
+const GROUPW={now:"Now",next:"Next",later:"Later",someday:"Someday"};
+const STARW=["important","urgent","priority","star","starred"];
+const CONN=["on","by","for","in","due","and","to","as","at"];
+function addDays(n){ const d=new Date(); d.setDate(d.getDate()+n); return iso(d); }
+function wdOf(w){ const i=WD.indexOf(w); return i>=0 ? i : (w in WDS ? WDS[w] : -1); }
+function nextWd(i, extra){ const diff=(i-new Date().getDay()+7)%7; return addDays(diff+(extra||0)); }
+function dayMonth(d, m){ const now=new Date(); let dt=new Date(now.getFullYear(), m, d, 12); if(iso(dt)<today()) dt=new Date(now.getFullYear()+1, m, d, 12); return iso(dt); }
+function numOf(w){ return /^\d+$/.test(w) ? +w : (w in NUMW ? NUMW[w] : null); }
+function matchEnd(ws){ // ws: cleaned lower-case words; returns {n, kind, val} for the longest known phrase at the end
+  const L=ws.length, w1=ws[L-1], w2=ws[L-2], w3=ws[L-3];
+  if(L>=3 && w3==="in" && numOf(w2)!=null && /^(day|days|week|weeks)$/.test(w1)) return {n:3, kind:"due", val:addDays(numOf(w2)*(w1.startsWith("week")?7:1))};
+  if(L>=3 && /^\d{1,2}(st|nd|rd|th)?$/.test(w3) && w2==="of" && w1 in MON) return {n:3, kind:"due", val:dayMonth(parseInt(w3), MON[w1])};
+  if(L>=2){
+    const two=w2+" "+w1;
+    if(two in AREAW) return {n:2, kind:"tag", val:AREAW[two]};
+    if(two==="my day") return {n:2, kind:"myday", val:true};
+    if(two==="next week") return {n:2, kind:"due", val:nextWd(1, new Date().getDay()===1?7:0)};
+    if(w2==="next" && wdOf(w1)>=0){ const mon=new Date().getDay()===1?7:(1-new Date().getDay()+7)%7; return {n:2, kind:"due", val:addDays(mon+((wdOf(w1)+6)%7))}; }
+    if(w2==="this" && wdOf(w1)>=0) return {n:2, kind:"due", val:nextWd(wdOf(w1))};
+    if(/^\d{1,2}(st|nd|rd|th)?$/.test(w2) && w1 in MON) return {n:2, kind:"due", val:dayMonth(parseInt(w2), MON[w1])};
+    if(w2 in MON && /^\d{1,2}(st|nd|rd|th)?$/.test(w1)) return {n:2, kind:"due", val:dayMonth(parseInt(w1), MON[w2])};
+  }
+  if(w1 in AREAW) return {n:1, kind:"tag", val:AREAW[w1]};
+  if(w1 in GROUPW) return {n:1, kind:"group", val:GROUPW[w1]};
+  if(STARW.includes(w1)) return {n:1, kind:"star", val:true};
+  if(w1==="waiting") return {n:1, kind:"waiting", val:true};
+  if(w1==="today"||w1==="tonight") return {n:1, kind:"due", val:today()};
+  if(w1==="tomorrow"||w1==="tmrw") return {n:1, kind:"due", val:addDays(1)};
+  if(wdOf(w1)>=0) return {n:1, kind:"due", val:nextWd(wdOf(w1))};
+  const dm=w1.match(/^(\d{1,2})\/(\d{1,2})$/); if(dm && +dm[2]>=1 && +dm[2]<=12) return {n:1, kind:"due", val:dayMonth(+dm[1], +dm[2]-1)};
+  return null;
+}
+function parseQuick(text){
+  const raw=text.trim().split(/\s+/).filter(Boolean);
+  const r={title:text.trim(), star:false, tag:null, group:null, due:null, myday:false, waiting:false};
+  const clean=w=>w.toLowerCase().replace(/^[^\w\d/]+|[^\w\d/]+$/g,"");
+  let ws=raw.slice();
+  while(ws.length>1){
+    const m=matchEnd(ws.map(clean)); if(!m || ws.length-m.n<1) break;
+    if(r[m.kind] && r[m.kind]!==false && m.kind!=="star") break;   // a second date or area: treat as part of the title
+    r[m.kind]=m.val; ws=ws.slice(0, ws.length-m.n);
+    while(ws.length>1 && CONN.includes(clean(ws[ws.length-1]))) ws.pop();
+  }
+  if(ws.length<raw.length) r.title=ws.join(" ").replace(/[\s,;:\-–]+$/,"");
+  return r;
+}
+function plan(text, ctx){ // what the task will become: shared by the preview and by adding
+  const p=parseQuick(text);
+  const fromSomeday = ctx.group==="Someday";
+  const group = p.group || ctx.group || "Now";
+  const tag = p.tag || (fromSomeday || !ctx.tag ? "none" : ctx.tag);
+  return {title:p.title||text.trim(), group, tag,
+    heading: group==="Someday" ? (fromSomeday && !p.group ? ctx.tag : "Other") : null,
+    star: !!(ctx.star || p.star || ctx.smart==="important"),
+    myday: !!(ctx.myday || p.myday || ctx.smart==="myday"),
+    due: p.due || (ctx.smart==="planned" ? today() : null),
+    waiting: !!(p.waiting || ctx.smart==="waiting")};
+}
+function planLabel(pl){
+  const bits=[pl.title];
+  if(pl.due) bits.push(pl.due===today()?"today":nice(pl.due));
+  if(pl.star) bits.push("★");
+  if(pl.myday) bits.push("My Day");
+  if(pl.waiting) bits.push("waiting");
+  bits.push(pl.group==="Someday" ? "Someday, "+pl.heading : pl.group+(pl.tag!=="none"?", "+TAGS[pl.tag]:""));
+  return bits.join(" · ");
+}
+function addTask(text, ctx){
+  text=text.trim().replace(/\n/g," "); if(!text) return;
+  const pl=plan(text, ctx);
+  let ln="- [ ] "+pl.title+(pl.tag!=="none"?" `"+pl.tag+"`":"");
+  if(pl.myday) ln+=" [today: "+today()+"]";
+  if(pl.due) ln+=" [due: "+pl.due+"]";
+  if(pl.waiting) ln+=" [waiting: "+today()+"]";
+  if(pl.star) ln+=" ⭐";
+  ln+=" [added: "+today()+"]";
+  if(pl.group==="Someday") commit({k:"add", group:"Someday", heading:pl.heading, line:ln}, "added to Someday: "+short(pl.title));
+  else commit({k:"add", group:pl.group, tag:pl.tag, line:ln, top:true}, "added: "+short(pl.title));
+  return pl;
+}
+
+/* ---------- Selections ---------- */
+const open = it => !it.done;
+function isMyDay(it){ const t=today(); return it.myday===t || (it.due && it.due<=t); }
+function smartItems(kind){
+  const all=state.items.filter(it=>ACTIVE.includes(it.group));
+  if(kind==="myday") return all.filter(isMyDay);
+  if(kind==="important") return all.filter(it=>it.star);
+  if(kind==="review") return all.filter(it=>!it.done && (isStale(it)||isChase(it)||isStalled(it))).sort((a,b)=>reviewAge(b)-reviewAge(a));
+  if(kind==="waiting") return all.filter(it=>it.waiting).sort((a,b)=>a.waiting<b.waiting?-1:a.waiting>b.waiting?1:a.line-b.line);
+  if(kind==="planned") return all.filter(it=>it.due).sort((a,b)=>a.due<b.due?-1:a.due>b.due?1:a.line-b.line);
+  return all;
+}
+function listItems(group, key){ return state.items.filter(it=>it.group===group && it.list===key); }
+function listKeys(group){ if(group!=="Someday") return TAG_ORDER; return [...new Set(state.items.filter(it=>it.group==="Someday").map(it=>it.list))]; }
+const listName = k => TAGS[k] || k;
+// Starred first; then newest first by the date added; undated tasks after, in file order.
+function byImportance(a){ return a.slice().sort((x,y)=> (y.star-x.star) || (x.added===y.added ? 0 : !x.added ? 1 : !y.added ? -1 : (x.added<y.added ? 1 : -1)) || (x.line-y.line)); }
+
+/* ---------- Icons ---------- */
+const I = {
+  sun:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>',
+  star:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.2l2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 17l-5.4 2.9 1.1-6.1-4.5-4.2 6.1-.8z"/></svg>',
+  starf:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.2l2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 17l-5.4 2.9 1.1-6.1-4.5-4.2 6.1-.8z"/></svg>',
+  cal:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/></svg>',
+  home:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3.5 10.5L12 3.5l8.5 7V20a.5.5 0 01-.5.5H4a.5.5 0 01-.5-.5z"/><path d="M8.5 13.5l2.5 2.5 4.5-4.5" stroke-linecap="round"/></svg>',
+  list:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="4.5" cy="6.5" r=".6" fill="currentColor"/><circle cx="4.5" cy="12" r=".6" fill="currentColor"/><circle cx="4.5" cy="17.5" r=".6" fill="currentColor"/></svg>',
+  group:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="3.5" width="17" height="17" rx="3.5"/><path d="M9 8v8" stroke-linecap="round"/></svg>',
+  chev:'<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>',
+  back:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
+  search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5l5 5"/></svg>',
+  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v16M4 12h16"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  gear:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>',
+  refresh:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 10-2.3 5.7"/><path d="M20 4v7h-7"/></svg>',
+  link:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg>',
+  edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
+  bin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+  grid:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>',
+  wait:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
+  reorder:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16M4 7l3-3 3 3M17 20V4M14 17l3 3 3-3"/></svg>',
+  review:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13l2.5-8h11L20 13v6H4z"/><path d="M4 13h4.5l1 2h5l1-2H20"/></svg>',
+  up:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+  move:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>'
+};
+
+/* ---------- Render ---------- */
+const esc = s => String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const $ = id => document.getElementById(id);
+function setChrome(col){
+  document.documentElement.style.background=col; document.body.style.background=col;
+  const m=document.querySelector('meta[name="theme-color"]'); if(m) m.setAttribute("content", col);
+}
+function show(view){ for(const v of ["home","list","search","cc"]) $(v).classList.toggle("on", v===view); window.scrollTo(0,0); }
+function render(){
+  openSw=null;
+  if(route.view==="home") renderHome();
+  else if(route.view==="list") renderList();
+  else if(route.view==="search") renderSearch();
+  else if(route.view==="cc") renderCC();
+}
+function syncedLabel(){
+  if(pending.length) return pending.length+" change"+(pending.length>1?"s":"")+" waiting to sync";
+  if(!state.fetched) return "Not synced yet";
+  const d=new Date(state.fetched);
+  return "Synced "+d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})+(d.toDateString()!==new Date().toDateString()?", "+d.toLocaleDateString("en-GB",{day:"numeric",month:"short"}):"");
+}
+function renderHome(){
+  setChrome(getComputedStyle(document.documentElement).getPropertyValue("--bg").trim()||"#ffffff");
+  const n = a => a.filter(open).length || "";
+  let h='<div class="hdr"><div class="avatar">SJ</div><h1>Simon Jackson</h1>'+
+    '<button class="iconbtn" data-a="search" aria-label="Search">'+I.search+'</button>'+
+    '<button class="iconbtn plusbtn" data-a="quickadd" aria-label="New task">'+I.plus+'</button></div>';
+  h+='<button class="row" data-a="cc"><span class="ico" style="color:#c2410c">'+I.grid+'</span><span class="name">Control Centre</span><span class="count"></span></button>';
+  const smart=[["myday","My Day",I.sun,"#6e7781"],["important","Important",I.star,COLOURS.important],
+    ["planned","Planned",I.cal,COLOURS.planned],["waiting","Waiting",I.wait,COLOURS.waiting],["review","Review",I.review,COLOURS.review],["all","Tasks",I.home,COLOURS.all]];
+  for(const [k,label,ic,col] of smart)
+    h+='<button class="row" data-a="smart" data-k="'+k+'"><span class="ico" style="color:'+col+'">'+ic+'</span><span class="name">'+label+'</span><span class="count">'+n(smartItems(k))+'</span></button>';
+  h+='<div class="sep"></div>';
+  for(const g of GROUPS){
+    const closed=!openGroups[g];
+    h+='<div class="group'+(closed?" closed":"")+'"><button class="ghead" data-a="group" data-g="'+g+'"><span class="ico">'+I.group+'</span><span class="name">'+g+'</span><span class="count">'+n(state.items.filter(it=>it.group===g))+'</span><span class="chev">'+I.chev+'</span></button><div class="glists">';
+    for(const t of listKeys(g)){
+      const its=listItems(g,t); if(!its.length) continue;
+      h+='<button class="row" data-a="list" data-g="'+g+'" data-t="'+esc(t)+'"><span class="ico" style="color:'+COLOURS[g]+'">'+I.list+'</span><span class="name">'+esc(listName(t))+'</span><span class="count">'+n(its)+'</span></button>';
+    }
+    h+='</div></div>';
+  }
+  h+='<div class="foot">'+esc(syncedLabel())+'<button data-a="refresh">Refresh</button><button data-a="settings">Settings</button></div>';
+  $("home").innerHTML=h;
+}
+function subline(it, ctx){
+  const bits=[];
+  if(ctx.smart) bits.push(TAGS[it.tag]+" · "+it.group);
+  if(ctx.smart==="review" && !isChase(it)){ const b=it.reviewed||it.added; bits.push('<span class="od">'+(it.reviewed?"Kept ":"Added ")+esc(nice(b))+' · '+daysSince(b)+' days</span>'); }
+  if(it.myday===today() && ctx.smart!=="myday") bits.push("☀ My Day");
+  if(it.due){ const t=today(); bits.push(it.due<t?'<span class="od">Overdue, '+esc(nice(it.due))+'</span>':it.due===t?"Today":esc(nice(it.due))); }
+  if(it.notes) bits.push(esc(it.notes.length>70?it.notes.slice(0,68)+"...":it.notes));
+  return bits.length?'<div class="sub">'+bits.join(" · ")+'</div>':"";
+}
+function card(it, ctx){
+  return '<div class="sw" data-line="'+it.line+'"><div class="sw-l"><button class="sw-btn sun" data-a="sw-myday" aria-label="Add to My Day">'+I.sun+'</button><button class="sw-btn mv" data-a="sw-move" aria-label="Move">'+I.move+'</button></div>'+
+    '<div class="sw-r"><button class="sw-btn del" data-a="sw-del" aria-label="Delete">'+I.bin+'</button></div>'+
+    '<div class="card'+(it.done?" done":"")+'" data-line="'+it.line+'">'+
+    '<button class="tick" data-a="tick" aria-label="Complete">'+I.check+'</button>'+
+    '<div class="cbody" data-a="open"><div class="ttl">'+esc(it.title)+'</div>'+subline(it,ctx)+(ctx.smart==="review"?reviewRow(it):'')+'</div>'+
+    (reorderMode && !it.done ? '<div class="rcol"><span class="handle" data-h="1" aria-label="Drag to reorder">≡</span></div></div></div>' :
+    '<div class="rcol"><button class="star'+(it.star?"":" off")+'" data-a="star" aria-label="Important">'+(it.star?I.starf:I.star)+'</button>'+
+    (it.started && !it.waiting && !it.done ? '<span class="sbadge" aria-label="Started '+esc(nice(it.started))+'"><span>Started</span><span>'+daysSince(it.started)+'d</span></span>' : '')+
+    (it.waiting && !it.done ? '<button class="wbadge" data-a="waitinfo" aria-label="Waiting since '+esc(nice(it.waiting))+'">'+I.wait+'<span>'+daysSince(it.waiting)+'d</span></button>' : '')+
+    '</div></div></div>');
+}
+function reviewRow(it){
+  if(isStalled(it)) return '<div class="rvrow"><button data-a="rv-stillon">Still on it</button><button data-a="rv-unstart">Not started</button><button data-a="rv-drop" class="rvdrop">Drop</button><span class="help">started, no movement for '+daysSince(it.started)+' days</span></div>';
+  if(isChase(it)) return '<div class="rvrow"><button data-a="rv-chase">Chase…</button><span class="help">waiting '+daysSince(it.waiting)+' days</span></div>';
+  return '<div class="rvrow"><button data-a="rv-keep">Keep</button><button data-a="rv-date">Date it</button><button data-a="rv-someday">Someday</button><button data-a="rv-drop" class="rvdrop">Drop</button></div>';
+}
+function openDateIt(it){
+  current=it;
+  const fri=nextWd(5), mon=addDays((1-new Date().getDay()+7)%7||7);
+  openSheet('<button class="closex" data-s="cancel">Close</button><h3>Date it</h3><p class="help">'+esc(it.title)+'</p>'+
+    '<div class="qa-chips" style="margin:10px 0">'+[["Today",today()],["Tomorrow",addDays(1)],["Friday",fri],["Next week",mon]].map(([l,d])=>'<button class="qa-chip" data-s="dt-pick" data-d="'+d+'">'+l+' · '+esc(nice(d))+'</button>').join("")+'</div>'+
+    '<label class="act">'+I.cal+'Pick a date<input type="date" id="dt-input"></label>');
+  $("dt-input").addEventListener("change", e=>{ if(!e.target.value) return; closeSheet(); run(()=>setDue(it, e.target.value)); toast("Due "+nice(e.target.value)); });
+}
+function ctxTitle(ctx){
+  if(ctx.smart) return {myday:"My Day", important:"Important", planned:"Planned", waiting:"Waiting", review:"Review", all:"Tasks"}[ctx.smart];
+  return listName(ctx.tag);
+}
+function renderList(){
+  const ctx=route.ctx;
+  const col = ctx.smart ? COLOURS[ctx.smart] : COLOURS[ctx.group];
+  $("list").style.setProperty("--lbg", col); setChrome(col);
+  let items = ctx.smart ? smartItems(ctx.smart) : listItems(ctx.group, ctx.tag);
+  const mine = !ctx.smart && sortModes[listKeyOf(ctx)]==="mine";
+  const todo = (ctx.smart==="planned"||ctx.smart==="waiting"||ctx.smart==="review") ? items.filter(open) : mine ? items.filter(open).sort((a,b)=>a.line-b.line) : byImportance(items.filter(open));
+  if(ctx.smart) reorderMode=false;
+  const done = items.filter(it=>it.done);
+  let h='<div class="ltop"><button class="back" data-a="home">'+I.back+'Lists</button><span style="display:flex;gap:4px"><button class="iconbtn" style="color:#fff" data-a="refresh" aria-label="Refresh">'+I.refresh+'</button><button class="iconbtn" style="color:#fff" data-a="focusadd" aria-label="New task">'+I.plus+'</button>'+(ctx.smart?'':(reorderMode?'<button class="donebtn" data-a="reorder">Done</button>':'<button class="iconbtn" style="color:#fff" data-a="reorder" aria-label="Reorder">'+I.reorder+'</button>'))+'</span></div>';
+  h+='<h2>'+esc(ctxTitle(ctx))+'</h2>';
+  const label = ctx.smart==="planned" ? "Sorted by date" : ctx.smart==="waiting" ? "Longest waiting first" : ctx.smart==="review" ? "Keep, drop, date or park" : mine ? "My order ⇄" : (ctx.smart?"Sorted by importance, then newest":"Importance, then newest ⇄");
+  h+='<div class="chips">'+(ctx.smart?'<span class="chip">'+label+'</span>':'<button class="chip" data-a="togglesort">'+label+'</button>')+(reorderMode?'<span class="chip">Drag ≡ to reorder</span>':'')+(ctx.smart?"":'<span class="chip">'+esc(ctx.group)+'</span>')+(ctx.smart==="myday"?'<span class="chip">'+esc(nice(today()))+'</span>':"")+(pending.length?'<span class="chip">'+pending.length+' waiting to sync</span>':"")+'</div>';
+  if(!todo.length) h+='<div class="empty">'+(ctx.smart==="myday"?"Nothing for today yet. Add a task, or open one and choose Add to My Day.":ctx.smart==="review"?"Nothing to review. Tasks show here after "+STALE_DAYS+" days with no date, and chases after "+CHASE_DAYS+" days waiting.":"All done here.")+'</div>';
+  if(ctx.smart==="review"){
+    const ch=todo.filter(isChase), st=todo.filter(it=>!isChase(it));
+    if(ch.length){ h+='<div class="section">Waiting '+CHASE_DAYS+'+ days: chase?</div>'; for(const it of ch) h+=card(it,ctx); }
+    if(st.length){ h+='<div class="section">Untouched '+STALE_DAYS+'+ days, no date</div>'; for(const it of st) h+=card(it,ctx); }
+  } else if(ctx.smart==="planned"){
+    const t=today(); const sec={Overdue:[],Today:[],Later:[]};
+    for(const it of todo) sec[it.due<t?"Overdue":it.due===t?"Today":"Later"].push(it);
+    for(const k of ["Overdue","Today","Later"]) if(sec[k].length){ h+='<div class="section">'+k+'</div>'; for(const it of sec[k]) h+=card(it,ctx); }
+  } else for(const it of todo) h+=card(it,ctx);
+  if(done.length){
+    const showDone=!!store("dom-todo-showdone");
+    h+='<button class="section" data-a="showdone">'+(showDone?"▾":"▸")+' Completed '+done.length+'</button>';
+    if(showDone) for(const it of done) h+=card(it,ctx);
+  }
+  $("list").innerHTML=h;
+  $("list").classList.toggle("reorder", reorderMode);
+}
+function renderSearch(){
+  setChrome(getComputedStyle(document.documentElement).getPropertyValue("--bg").trim()||"#ffffff");
+  const q=(route.q||"").toLowerCase();
+  let h='<div class="searchbox"><button class="back" style="color:var(--accent)" data-a="home">'+I.back+'</button><input id="q" placeholder="Search tasks" value="'+esc(route.q||"")+'" autocomplete="off"></div>';
+  if(q){
+    const hits=state.items.filter(it=>(it.title+" "+it.notes+" "+TAGS[it.tag]).toLowerCase().includes(q));
+    h+= hits.length ? hits.map(it=>card(it,{smart:"all"})).join("") : '<div class="help" style="text-align:center;margin-top:30px">No matches</div>';
+  }
+  $("search").innerHTML=h;
+  const qi=$("q"); qi.focus(); qi.setSelectionRange(qi.value.length, qi.value.length);
+  qi.addEventListener("input", e=>{ route.q=e.target.value; renderSearch(); });
+}
+
+/* ---------- Control Centre ----------
+   Priorities/control-centre.html, read from the private repo with the same
+   token (never from the public site: it carries runway and home detail).
+   Shown in a sandboxed frame: its own script runs (capture links into
+   Obsidian), but it can't reach this app's storage or the token. */
+const CCKEY="dom-todo-cc";
+let ccLoading=false;
+function ccFrame(html){
+  const doc = html.replace(/<head([^>]*)>/i, '<head$1><base target="_top">');
+  return '<iframe class="ccframe" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation" srcdoc="'+esc(doc)+'"></iframe>';
+}
+function renderCC(fetchNow){
+  setChrome(getComputedStyle(document.documentElement).getPropertyValue("--bg").trim()||"#ffffff");
+  const c=store(CCKEY);
+  let h='<div class="cctop"><button class="back" style="color:var(--accent)" data-a="home">'+I.back+'Lists</button><span class="ccstamp">'+(c?"Fetched "+new Date(c.at).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}):"")+'</span><button class="iconbtn" data-a="ccrefresh" aria-label="Refresh">'+I.refresh+'</button></div>';
+  h += c ? ccFrame(c.html) : '<div class="help" style="text-align:center;margin-top:40px">Loading the Control Centre...</div>';
+  $("cc").innerHTML=h;
+  if(fetchNow && !ccLoading){
+    ccLoading=true;
+    fetchPath("Priorities/control-centre.html")
+      .then(f=>{
+        const prev=store(CCKEY); store(CCKEY,{html:f.text, at:Date.now()});
+        if(route.view!=="cc") return;
+        const fr=document.querySelector(".ccframe"), st=document.querySelector(".ccstamp");
+        if(st) st.textContent="Fetched "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+        if(!fr) renderCC(false);
+        else if(!prev || prev.html!==f.text) fr.srcdoc=f.text.replace(/<head([^>]*)>/i, '<head$1><base target="_top">');
+      })
+      .catch(e=>toast(e.network?"No connection: showing the last copy":e.message))
+      .finally(()=>{ ccLoading=false; });
+  }
+}
+
+/* ---------- Waiting panel (tap the clock under the star) ---------- */
+function openWaitPanel(it){
+  current=it;
+  const n=daysSince(it.waiting);
+  openSheet('<button class="closex" data-s="cancel">Close</button>'+
+    '<h3>'+esc(it.title)+'</h3>'+
+    '<div class="wsum">'+I.wait+'<span>Waiting since <b>'+esc(nice(it.waiting))+'</b> · '+(n===0?'today':n+' day'+(n===1?'':'s'))+(it.due?' · chase on '+esc(nice(it.due)):'')+'</span></div>'+
+    '<button class="act" data-s="w-chased">'+I.refresh+'Chased again today<span class="help" style="margin-left:auto">resets the clock</span></button>'+
+    '<button class="act" data-s="w-reply">'+I.check+'Got a reply<span class="help" style="margin-left:auto">stops waiting</span></button>'+
+    '<label class="act">'+I.cal+'Chase on<input type="date" id="w-chase" value="'+(it.due||"")+'"></label>'+
+    '<button class="act" data-s="w-open">'+I.edit+'Open the task</button>');
+  $("w-chase").addEventListener("change", e=>{ closeSheet(); run(()=>setDue(it, e.target.value||null)); toast(e.target.value?"You'll see it in My Day on "+nice(e.target.value):"Chase date cleared"); });
+}
+
+/* ---------- Quick add (the + on the home screen) ---------- */
+const QKEY="dom-todo-quick";
+let qaBase=null, qaPersist=true;
+function listPreset(ctx){
+  const last=Object.assign({group:"Now", tag:"search"}, store(QKEY)||{});
+  if(!ctx.smart) return {group:ctx.group, tag:ctx.tag};
+  return {group:"Now", tag:last.tag, smart:ctx.smart, star:ctx.smart==="important", myday:ctx.smart==="myday"};
+}
+function openQuickAdd(pre){
+  /* Simple add (Simon, 8 Oct): one box and an Add button. New tasks go to the Inbox at the top of Now,
+     and Dom files them at the next session; adding from inside a list keeps that list. */
+  qaPersist=false; qaPre = pre ? Object.assign({}, pre) : null;
+  qaBase = pre ? Object.assign({}, pre) : {group:"Now", tag:"inbox"}; qaBase.star=!!qaBase.star; qaBase.myday=!!qaBase.myday; qaMode="chips";
+  const where = pre ? (pre.group==="Someday" ? "Someday" : pre.group+", "+(TAGS[pre.tag]||"Tasks")) : "the Inbox (I file it into the right list)";
+  $("compose").innerHTML=
+    '<div class="cp-top"><textarea id="qa-text" rows="3" placeholder="Add a task" enterkeyhint="done"></textarea>'+
+    '<button class="cp-add" id="cp-send" data-c="send" aria-label="Add">Add</button></div>'+
+    '<div class="cp-note" id="qa-note">Goes to '+esc(where)+'.</div>';
+  $("compose").classList.add("on"); $("cscrim").classList.add("on");
+  const ta=$("qa-text"); ta.focus();
+  ta.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); quickAdd(); } });
+  ta.addEventListener("beforeinput", e=>{ if(e.inputType==="insertLineBreak"||e.inputType==="insertParagraph"){ e.preventDefault(); quickAdd(); } });
+  kbPlace();
+}
+let qaPre=null;
+let qaMode="chips";
+function qaCtx(){ const q=qaBase||{group:"Now", tag:"search"};
+  const someTag = q.group==="Someday" ? (TAGS[q.tag] ? "Other" : q.tag) : q.tag;
+  return {group:q.group, tag:someTag, smart:q.smart, star:!!q.star, myday:!!q.myday}; }
+function qaPlan(){ const t=($("qa-text").value||"").trim(); return t ? plan(t, qaCtx()) : null; }
+function cpRow(){
+  const pl=qaPlan(), q=qaBase, g=pl?pl.group:q.group, tg=pl?pl.tag:q.tag, st=pl?pl.star:q.star, md=pl?pl.myday:q.myday;
+  let h="";
+  if(qaMode==="group") h=GROUPS.map(x=>'<button class="cp-chip'+(x===g?" on":"")+'" data-c="set-group" data-v="'+x+'">'+x+'</button>').join("");
+  else if(qaMode==="tag") h=TAG_ORDER.filter(t=>t!=="none").map(t=>'<button class="cp-chip'+(t===tg?" on":"")+'" data-c="set-tag" data-v="'+t+'">'+esc(TAGS[t])+'</button>').join("");
+  else h='<button class="cp-chip" data-c="mode-group">'+esc(g)+' ▾</button>'+
+         (g==="Someday" ? '' : '<button class="cp-chip" data-c="mode-tag">'+esc(TAGS[tg]||"No area")+' ▾</button>')+
+         '<button class="cp-chip'+(st?" on":"")+'" data-c="star">'+(st?I.starf:I.star)+'</button>'+
+         '<button class="cp-chip'+(md?" on":"")+'" data-c="myday">'+I.sun+'My Day</button>';
+  $("cp-row").innerHTML=h;
+}
+function qaPreview(){
+  const pl=qaPlan(), pv=$("qa-prev");
+  pv.textContent = pl ? "→ "+planLabel(pl) : 'Say the task, then the details: "Chase Greg Friday, important"';
+  pv.classList.toggle("live", !!pl);
+  $("cp-send").classList.toggle("on", !!pl);
+  if(qaMode==="chips") cpRow();
+}
+function closeCompose(){ $("compose").classList.remove("on"); $("cscrim").classList.remove("on"); const ta=$("qa-text"); if(ta) ta.blur(); }
+function quickAdd(){
+  const ta=$("qa-text"); const text=(ta.value||"").trim().replace(/\s+/g," "); if(!text){ ta.focus(); return; }
+  let dest;
+  try{
+    if(qaPre){ const pl=addTask(text, qaCtx()); if(!pl) return; dest = pl.group==="Someday" ? null : {group:pl.group, tag:pl.tag}; }
+    else{
+      const ln="- [ ] "+text+" `inbox` [added: "+today()+"]";
+      if(!commit({k:"add", group:"Now", heading:"Inbox", line:ln}, "added to Inbox: "+short(text))) return;
+      dest={group:"Now", tag:"inbox"};
+    }
+  }catch(e){ toast(e.message||"Couldn't add that"); return; }
+  ta.value=""; closeCompose();
+  if(dest){ route={view:"list", ctx:dest}; show("list"); renderList(); }
+  toast("Added: "+short(text));
+}
+function kbPlace(){
+  const vv=window.visualViewport, c=$("compose"); if(!vv||!c) return;
+  const kb=Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+  c.style.bottom=kb+"px";
+}
+if(window.visualViewport){ visualViewport.addEventListener("resize", kbPlace); visualViewport.addEventListener("scroll", kbPlace); }
+document.addEventListener("click", e=>{
+  const b=e.target.closest("[data-c]"); if(!b || !qaBase) return;
+  const c=b.dataset.c, ta=$("qa-text");
+  if(c==="send"){ quickAdd(); return; }
+  if(c==="mode-group"){ qaMode="group"; cpRow(); }
+  else if(c==="mode-tag"){ qaMode="tag"; cpRow(); }
+  else if(c==="set-group"){ qaBase.group=b.dataset.v; qaMode="chips"; qaPreview(); cpRow(); }
+  else if(c==="set-tag"){ qaBase.tag=b.dataset.v; qaMode="chips"; qaPreview(); cpRow(); }
+  else if(c==="star"){ qaBase.star=!qaBase.star; qaPreview(); cpRow(); }
+  else if(c==="myday"){ qaBase.myday=!qaBase.myday; qaPreview(); cpRow(); }
+  if(qaPersist && (c==="set-group"||c==="set-tag")) store(QKEY, {group:qaBase.group, tag:TAGS[qaBase.tag]?qaBase.tag:"search"});
+  if(ta) ta.focus();
+});
+
+/* ---------- Sheets ---------- */
+function openSheet(html){ $("sheet").innerHTML='<div class="grab"></div>'+html; $("sheet").classList.add("on"); $("scrim").classList.add("on"); }
+function closeSheet(){ $("sheet").classList.remove("on"); $("scrim").classList.remove("on"); }
+function obsidianUrl(p){
+  let path=p.replace(/^(\.\.\/)+/,"").replace(/^\.\//,"");
+  if(/^https?:/.test(p)) return p;
+  return "obsidian://open?vault="+encodeURIComponent(settings.vault)+"&file="+encodeURIComponent(path.replace(/\.md$/,""));
+}
+let current=null;
+function openDetail(it){
+  current=it;
+  let h='<button class="closex" data-s="close-detail" aria-label="Close">Close</button><textarea id="d-title" class="d-title" rows="1" enterkeyhint="done">'+esc(it.title)+'</textarea>';
+  h+='<div class="meta">'+esc(TAGS[it.tag])+' · '+esc(it.group)+(it.sub&&it.sub!==TAGS[it.tag]?' · '+esc(it.sub):'')+(it.id?' · '+esc(it.id):'')+'</div>';
+  h+='<textarea id="d-notes" class="d-notes" rows="1" placeholder="Add note">'+esc(it.notes)+'</textarea>';
+  h+='<button class="act" data-s="done">'+I.check+(it.done?"Mark as not done":"Mark as done")+'</button>';
+  h+='<button class="act" data-s="star">'+(it.star?I.starf:I.star)+(it.star?"Remove importance":"Mark as important")+'</button>';
+  h+='<button class="act" data-s="myday">'+I.sun+(it.myday===today()?"Remove from My Day":"Add to My Day")+'</button>';
+  h+= it.started
+    ? '<button class="act" data-s="started">'+I.check+'Still on it<span class="help" style="margin-left:auto">started '+esc(nice(it.started))+'</span></button><button class="act" data-s="unstart">'+I.check+'Not started after all</button>'
+    : '<button class="act" data-s="started">'+I.check+'Mark as started</button>';
+  h+='<button class="act" data-s="waiting">'+I.wait+(it.waiting?"No longer waiting (since "+esc(nice(it.waiting))+")":"Waiting for a reply")+'</button>';
+  h+='<label class="act">'+I.cal+'Due<input type="date" id="due" value="'+(it.due||"")+'"></label>';
+  h+='<button class="act" data-s="openmove">'+I.move+'<span>Move <span class="help">('+esc(it.group)+', '+esc(TAGS[it.tag])+')</span></span></button>';
+  if(it.links.length){ h+='<div class="act" style="display:block">'+'<div class="links">'+it.links.map(l=>'<a href="'+esc(obsidianUrl(l.path))+'">'+I.link.replace("<svg",'<svg style="width:16px;height:16px;vertical-align:-3px;margin-right:6px"')+esc(plain(l.label))+'</a>').join("")+'</div></div>'; }
+  h+='<button class="act" data-s="edit">'+I.edit+'<span>Edit the markdown <span class="help">(tags, links, dates)</span></span></button>';
+  h+='<button class="act danger" data-s="delete">'+I.bin+'Delete task</button>';
+  openSheet(h);
+  const ti=$("d-title"), no=$("d-notes");
+  const grow=el=>{ el.style.height="0px"; el.style.height=el.scrollHeight+"px"; };
+  [ti,no].forEach(el=>{ el.addEventListener("input",()=>grow(el)); });
+  requestAnimationFrame(()=>{ grow(ti); grow(no); });
+  ti.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); ti.blur(); } });
+  const save=()=>{ const t=ti.value, n=no.value; if(t.trim()===it.title && n.trim()===it.notes) return; run(()=>editText(it,t,n)); };
+  ti.addEventListener("blur", save); no.addEventListener("blur", save);
+  $("due").addEventListener("change", e=>run(()=>setDue(it, e.target.value||null)));
+}
+function openEdit(it){
+  openSheet('<h3>Edit the markdown</h3><p class="help">The line exactly as it is in to-do.md, for tags, links and dates. For the title and note, use the fields on the task instead.</p><textarea id="raw">'+esc(it.raw)+'</textarea><button class="btn" data-s="saveraw">Save</button><button class="btn ghost" data-s="cancel">Cancel</button>');
+}
+function openSettings(){
+  openSheet('<h3>Settings</h3>'+
+    '<label class="field"><span>Repository (owner/name)</span><input id="s-repo" value="'+esc(settings.repo)+'" placeholder="owner/repo" autocapitalize="off" autocorrect="off"></label>'+
+    '<label class="field"><span>GitHub token (fine-grained; this repo only; Contents read and write)</span><input id="s-token" type="password" value="'+esc(settings.token)+'" autocapitalize="off" autocorrect="off"></label>'+
+    '<label class="field"><span>Branch</span><input id="s-branch" value="'+esc(settings.branch)+'" autocapitalize="off"></label>'+
+    '<label class="field"><span>File</span><input id="s-path" value="'+esc(settings.path)+'" autocapitalize="off"></label>'+
+    '<label class="field"><span>Obsidian vault name (for links)</span><input id="s-vault" value="'+esc(settings.vault)+'" autocapitalize="off"></label>'+
+    '<p class="help">The token stays on this phone, in this app\'s storage. It never goes into the vault.</p>'+
+    '<button class="btn" data-s="savesettings">Save and sync</button>');
+}
+
+/* ---------- Actions ---------- */
+let toastTimer;
+function toast(msg, action){
+  const t=$("toast"); t.innerHTML='<span>'+esc(msg)+'</span>'+(action?'<button id="undo">Undo</button>':'');
+  t.classList.add("on"); t.classList.toggle("act", !!action);
+  if(action) $("undo").onclick=()=>{ t.classList.remove("on"); clearTimeout(toastTimer); action(); };
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("on"), action?5000:2600);
+}
+async function run(fn, ok){ try{ await fn(); if(ok) toast(ok); }catch(e){ toast(e.message||String(e)); render(); } }
+function itemAt(el){ const c=el.closest(".sw")||el.closest(".card"); if(!c) return null; const line=+c.dataset.line; return state.items.find(it=>it.line===line)||null; }
+
+document.addEventListener("click", e=>{
+  const b=e.target.closest("[data-a]");
+  if(openSw && !(b && b.dataset.a.startsWith("sw-") && b.closest(".sw")===openSw)){ const was=openSw; closeSw(); if(!b || was.contains(b)) return; }
+  if(!b) return;
+  if(reorderMode && ["open","tick","star","waitinfo"].includes(b.dataset.a)) return;
+  const swEl=b.closest(".sw"); if(swEl && swEl.dataset.swiped && !b.dataset.a.startsWith("sw-")) return;
+  const a=b.dataset.a;
+  if(a==="sw-myday"){ const it=itemAt(b); closeSw(); if(it) run(()=>toggleMyDay(it), it.myday===today()?"Off My Day":"Added to My Day"); return; }
+  if(a==="sw-move"){ const it=itemAt(b); closeSw(); if(it) openMove(it); return; }
+  if(a==="sw-del"){ const it=itemAt(b); closeSw(); if(it && confirm("Delete this task?\n\n"+it.title)) run(()=>removeItem(it)); return; }
+  if(a==="smart"){ route={view:"list", ctx:{smart:b.dataset.k}}; show("list"); renderList(); }
+  else if(a==="list"){ route={view:"list", ctx:{group:b.dataset.g, tag:b.dataset.t}}; show("list"); renderList(); }
+  else if(a==="home"){ route={view:"home"}; show("home"); renderHome(); }
+  else if(a==="group"){ const g=b.dataset.g; openGroups[g]=!openGroups[g]; store(OKEY,openGroups); renderHome(); }
+  else if(a==="search"){ route={view:"search", q:""}; show("search"); renderSearch(); }
+  else if(a==="quickadd"){ openQuickAdd(); }
+  else if(a==="reorder"){ reorderMode=!reorderMode; renderList(); if(!reorderMode) toast("Order saved"); }
+  else if(a==="togglesort"){ const k=listKeyOf(route.ctx); sortModes[k] = sortModes[k]==="mine" ? "importance" : "mine"; store(SORTKEY, sortModes); renderList(); }
+  else if(a==="focusadd"){ openQuickAdd(listPreset(route.ctx)); }
+  else if(a==="cc"){ route={view:"cc"}; show("cc"); renderCC(true); }
+  else if(a==="ccrefresh"){ renderCC(true); }
+  else if(a==="refresh"){ refresh().then(()=>toast(syncedLabel())); }
+  else if(a==="settings"){ openSettings(); }
+  else if(a==="showdone"){ store("dom-todo-showdone", !store("dom-todo-showdone")); renderList(); }
+  else if(a==="tick"){ const it=itemAt(b); if(!it) return; b.closest(".card").classList.toggle("done"); run(()=>toggleDone(it)); }
+  else if(a==="star"){ const it=itemAt(b); if(!it) return; run(()=>toggleStar(it)); }
+  else if(a==="rv-stillon"){ const it=itemAt(b); if(it) run(()=>setStarted(it,true)); }
+  else if(a==="rv-unstart"){ const it=itemAt(b); if(it) run(()=>setStarted(it,false)); }
+  else if(a==="rv-keep"){ const it=itemAt(b); if(it){ run(()=>setLine(it, setMarker(it.raw,"reviewed",today()), "kept on review: "+short(it.title), true, "Kept: back in "+STALE_DAYS+" days")); } }
+  else if(a==="rv-drop"){ const it=itemAt(b); if(it) run(()=>removeItem(it)); }
+  else if(a==="rv-someday"){ const it=itemAt(b); if(it) run(()=>moveTo(it, "Someday")); }
+  else if(a==="rv-date"){ const it=itemAt(b); if(it) openDateIt(it); }
+  else if(a==="rv-chase"){ const it=itemAt(b); if(it) openWaitPanel(it); }
+  else if(a==="waitinfo"){ const it=itemAt(b); if(it) openWaitPanel(it); }
+  else if(a==="open"){ const it=itemAt(b); if(it) openDetail(it); }
+});
+$("scrim").addEventListener("click", closeSheet);
+$("cscrim").addEventListener("click", closeCompose);
+$("sheet").addEventListener("click", e=>{
+  const mb=e.target.closest("[data-m]");
+  if(mb && mv){ mv[mb.dataset.m]=mb.dataset.v; mb.parentElement.querySelectorAll("[data-m]").forEach(x=>x.classList.toggle("on", x===mb)); return; }
+  const qb=null;
+  if(qb){ qaBase=qaBase||{group:"Now", tag:"search"}; qaBase[qb.dataset.q]=qb.dataset.v;
+    if(qaPersist) store(QKEY, {group:qaBase.group, tag:TAGS[qaBase.tag]?qaBase.tag:"search"});
+    qb.parentElement.querySelectorAll("[data-q]").forEach(x=>x.classList.toggle("on", x===qb)); if($("qa-prev")) qaPreview(); return; }
+  const b=e.target.closest("[data-s]"); if(!b) return;
+  const s=b.dataset.s, it=current;
+  if(s==="done"){ closeSheet(); run(()=>toggleDone(it)); }
+  else if(s==="star"){ closeSheet(); run(()=>toggleStar(it)); }
+  else if(s==="started"){ closeSheet(); run(()=>setStarted(it,true)); }
+  else if(s==="unstart"){ closeSheet(); run(()=>setStarted(it,false)); }
+  else if(s==="waiting"){ closeSheet(); run(()=>toggleWaiting(it)); }
+  else if(s==="w-chased"){ closeSheet(); run(()=>setLine(it, setMarker(it.raw,"waiting",today()), "chased again: "+short(it.title))); toast("Clock reset to today"); }
+  else if(s==="w-reply"){ closeSheet(); run(()=>setLine(it, setMarker(it.raw,"waiting",null), "got a reply: "+short(it.title), true, "No longer waiting")); }
+  else if(s==="w-open"){ openDetail(it); }
+  else if(s==="dt-pick"){ closeSheet(); const d=b.dataset.d; run(()=>setDue(it, d)); toast("Due "+nice(d)); }
+  else if(s==="myday"){ closeSheet(); run(()=>toggleMyDay(it), it.myday===today()?"Off My Day":"Added to My Day"); }
+  else if(s==="openmove"){ openMove(it); }
+  else if(s==="edit"){ openEdit(it); }
+  else if(s==="saveraw"){ const v=$("raw").value.trim(); closeSheet(); run(()=>editRaw(it, v)); }
+  else if(s==="cancel"){ closeSheet(); }
+
+  else if(s==="mv-go"){ closeSheet(); const m=mv; run(()=>moveTo(it, m.group, m.tag)); }
+  else if(s==="close-detail"){ if(document.activeElement && document.activeElement.blur) document.activeElement.blur(); closeSheet(); }
+  else if(s==="delete"){ if(confirm("Delete this task from to-do.md?\n\n"+it.title)){ closeSheet(); run(()=>removeItem(it)); } }
+  else if(s==="savesettings"){
+    settings={repo:$("s-repo").value.trim(), token:$("s-token").value.trim(), branch:$("s-branch").value.trim()||"main",
+      path:$("s-path").value.trim()||"to-do.md", vault:$("s-vault").value.trim()||"Work"};
+    store(SKEY, settings); closeSheet(); refresh().then(()=>{ if(state.fetched) toast("Connected"); });
+  }
+});
+document.addEventListener("visibilitychange", ()=>{ if(document.hidden) return; if(Date.now()-state.fetched>30000) refresh(true); else pump(); });
+
+/* ---------- Swipe (Microsoft To Do style) ----------
+   Swipe right: My Day and Move. Swipe left: Delete; a long swipe left deletes
+   straight away (after a confirm). */
+let mv=null;
+function openMove(it){
+  current=it; mv={group:it.group, tag:it.tag};
+  const areas=TAG_ORDER.filter(t=>t!=="none");
+  openSheet('<button class="closex" data-s="cancel">Close</button><h3>Move</h3><p class="help">'+esc(it.title)+'</p>'+
+    '<div class="qa-row"><span class="qa-lab">When</span><div class="seg">'+GROUPS.map(g=>'<button data-m="group" data-v="'+g+'" class="'+(mv.group===g?"on":"")+'">'+g+'</button>').join("")+'</div></div>'+
+    '<div class="qa-row qa-areas"><span class="qa-lab">Area</span><div class="qa-chips">'+areas.map(t=>'<button data-m="tag" data-v="'+t+'" class="qa-chip'+(mv.tag===t?" on":"")+'">'+esc(TAGS[t])+'</button>').join("")+'</div></div>'+
+    '<p class="help">Now: '+esc(it.group)+', '+esc(TAGS[it.tag])+'</p>'+
+    '<button class="btn" data-s="mv-go">Move</button>');
+}
+let openSw=null, drag=null;
+const OPEN_R=160, OPEN_L=-90;
+function setX(sw,x){ sw.querySelector(".card").style.transform = x ? "translateX("+x+"px)" : ""; sw.dataset.x=x||0; }
+function closeSw(){ if(openSw){ setX(openSw,0); openSw=null; } }
+document.addEventListener("touchstart", e=>{
+  if(reorderMode) return;
+  const sw=e.target.closest(".sw"); if(!sw || e.target.closest(".sw-btn")) return;
+  if(openSw && openSw!==sw) closeSw();
+  const t=e.touches[0];
+  drag={sw, x0:t.clientX, y0:t.clientY, base:+(sw.dataset.x||0), dx:0, mode:null, w:sw.offsetWidth};
+},{passive:true});
+document.addEventListener("touchmove", e=>{
+  if(!drag) return;
+  const t=e.touches[0], dx=t.clientX-drag.x0, dy=t.clientY-drag.y0;
+  if(!drag.mode){ if(Math.abs(dx)>10 && Math.abs(dx)>Math.abs(dy)) { drag.mode="h"; drag.sw.classList.add("dragging"); } else if(Math.abs(dy)>10){ drag=null; return; } else return; }
+  e.preventDefault();
+  drag.dx=dx;
+  setX(drag.sw, Math.max(-drag.w*0.85, Math.min(OPEN_R+30, drag.base+dx)));
+},{passive:false});
+document.addEventListener("touchend", ()=>{
+  if(!drag) return;
+  const d=drag; drag=null;
+  if(d.mode!=="h") return;
+  d.sw.classList.remove("dragging");
+  const x=d.base+d.dx;
+  if(x>70){ setX(d.sw,OPEN_R); openSw=d.sw; }
+  else if(x<-d.w*0.55){ setX(d.sw,0); openSw=null; const it=itemAt(d.sw); if(it && confirm("Delete this task?\n\n"+it.title)) run(()=>removeItem(it)); }
+  else if(x<-50){ setX(d.sw,OPEN_L); openSw=d.sw; }
+  else { setX(d.sw,0); if(openSw===d.sw) openSw=null; }
+  d.sw.dataset.swiped="1"; setTimeout(()=>{ delete d.sw.dataset.swiped; },350);
+});
+
+/* ---------- Reorder (drag the ≡ handle) ----------
+   The lifted card follows the finger; the others slide out of its way. On
+   release the new order is written to to-do.md by swapping these tasks among
+   their own lines, so no task changes list or section. The list then shows
+   "My order". */
+let rd=null;
+function rdCards(){ return [...document.querySelectorAll("#list .sw")].filter(el=>!el.querySelector(".card.done")); }
+document.addEventListener("touchstart", e=>{
+  if(!reorderMode || rd) return; const h=e.target.closest(".handle"); if(!h) return;
+  e.preventDefault();
+  const el=h.closest(".sw"), cards=rdCards(), i0=cards.indexOf(el);
+  const rects=cards.map(c=>c.getBoundingClientRect());
+  const gap = cards.length>1 ? rects[1].top-rects[0].bottom : 5;
+  rd={el, cards, i0, to:i0, rects, gap, y0:e.touches[0].clientY, y:e.touches[0].clientY, sy0:window.scrollY, h:rects[i0].height+gap,
+      before:cards.map(x=>+x.dataset.line), raf:0};
+  el.classList.add("lift");
+  cards.forEach(c=>{ if(c!==el) c.classList.add("shift"); });
+  const loop=()=>{ if(!rd) return;
+    const edge=110, y=rd.y;
+    if(y<edge) window.scrollBy(0, -Math.ceil((edge-y)/6));
+    else if(y>innerHeight-edge-60) window.scrollBy(0, Math.ceil((y-(innerHeight-edge-60))/6));
+    rdLayout(); rd.raf=requestAnimationFrame(loop); };
+  rd.raf=requestAnimationFrame(loop);
+},{passive:false});
+function rdLayout(){
+  const scrolled=window.scrollY-rd.sy0, dy=rd.y-rd.y0+scrolled;
+  rd.el.style.transform="translateY("+dy+"px) scale(1.02)";
+  // where the lifted card's middle now sits, in page terms at drag start
+  const mid=rd.rects[rd.i0].top+rd.rects[rd.i0].height/2+dy;
+  let to=rd.i0;
+  for(let k=0;k<rd.cards.length;k++){ if(k===rd.i0) continue; const r=rd.rects[k], m=r.top+r.height/2;
+    if(k<rd.i0 && mid<m) { to=Math.min(to,k); } if(k>rd.i0 && mid>m) { to=Math.max(to,k); } }
+  if(to!==rd.to){ rd.to=to;
+    rd.cards.forEach((c,k)=>{ if(k===rd.i0) return; let off=0;
+      if(rd.i0<to && k>rd.i0 && k<=to) off=-rd.h; else if(to<rd.i0 && k>=to && k<rd.i0) off=rd.h;
+      c.style.transform = off ? "translateY("+off+"px)" : ""; }); }
+}
+document.addEventListener("touchmove", e=>{ if(!rd) return; e.preventDefault(); rd.y=e.touches[0].clientY; rdLayout(); },{passive:false});
+function rdEnd(){
+  if(!rd) return; cancelAnimationFrame(rd.raf); rdLayout();
+  const d=rd; rd=null;
+  d.cards.forEach(c=>{ c.style.transform=""; c.classList.remove("shift","lift"); });
+  if(d.to===d.i0) return;
+  const order=d.before.slice(); const [moved]=order.splice(d.i0,1); order.splice(d.to,0,moved);
+  const byLine=l=>state.items.find(it=>it.line===l);
+  const newOrder=order.map(l=>byLine(l).raw), oldOrder=d.before.map(l=>byLine(l).raw);
+  const k=listKeyOf(route.ctx); sortModes[k]="mine"; store(SORTKEY, sortModes);
+  commit({k:"reorder", order:newOrder}, "reordered "+route.ctx.group+", "+TAGS[route.ctx.tag], {k:"reorder", order:oldOrder}, "Order changed");
+}
+document.addEventListener("touchend", rdEnd);
+document.addEventListener("touchcancel", rdEnd);
+
+/* ---------- Self-update ----------
+   The phone can hold an old copy of this page for a while. On opening, and
+   when the app comes back to the front, check the published page; if its
+   version differs, load the new one (a fresh URL, so no cache). */
+async function checkUpdate(){
+  try{
+    const r=await fetch("./index.html?check="+Date.now(), {cache:"no-store"});
+    if(!r.ok) return;
+    const t=await r.text(); const m=t.match(/APP_VERSION = "([^"]+)"/);
+    if(m && m[1]!==APP_VERSION && !pending.length) location.replace(location.pathname+"?v="+encodeURIComponent(m[1]));
+  }catch(e){}
+}
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) checkUpdate(); });
+
+/* ---------- Start ---------- */
+const cached=store(CKEY);
+if(cached && cached.text){ state.base=cached.text; state.sha=cached.sha; state.fetched=cached.fetched||0; recompute(); }
+render();
+refresh();
+checkUpdate();
+</script>
+</body>
+</html>
